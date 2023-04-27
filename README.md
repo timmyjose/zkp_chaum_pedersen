@@ -1,3 +1,3 @@
-## An authentication system implemnted using ZKP (Chaum-Pedersen) protocol
+## An authentication system implemented using ZKP (Chaum-Pedersen) protocol
 
 TBD

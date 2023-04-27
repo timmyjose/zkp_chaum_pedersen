@@ -1,0 +1,10 @@
+version: "3.9"
+services:
+  zkp_server:
+    build: ./zkp_server
+    ports:
+      - "9999:9999"
+  zkp_client:
+    build: ./zkp_client
+    ports:
+      - "8888:8888"  
