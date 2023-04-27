@@ -7,7 +7,7 @@ pub mod zkp_auth {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut auth_client = AuthClient::connect("http://127.0.0.1:9999").await?;
+    let mut auth_client = AuthClient::connect("http://zkp_server:9999").await?;
 
     let request = tonic::Request::new(RegisterRequest {
         user: "dummy user".into(),

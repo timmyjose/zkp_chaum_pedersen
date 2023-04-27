@@ -8,3 +8,5 @@ services:
     build: ./zkp_client
     ports:
       - "8888:8888"  
+    links:
+      - zkp_server

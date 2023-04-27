@@ -10,7 +10,7 @@ use zkp_server::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let address = "127.0.0.1:9999".parse()?;
+    let address = "0.0.0.0:9999".parse()?;
 
     let auth_server = AuthImpl::default();
 
