@@ -1,13 +1,14 @@
-use zkp_auth::auth_client::AuthClient;
-use zkp_auth::{RegisterRequest, RegisterResponse};
+use once_cell::sync::OnceCell;
+use std::collections::HashMap;
 
-pub mod zkp_auth {
-    tonic::include_proto!("zkp_auth");
-}
+type SessionId = String;
 
+static mut LOGGED_IN_USERS: OnceCell<HashMap<String, SessionId>> = OnceCell::new();
+
+/// External routes
 mod filters {
     use super::handlers;
-    use super::models::User;
+    use super::models::LoginDetails;
     use warp::Filter;
 
     pub fn ext_clients(
@@ -15,7 +16,7 @@ mod filters {
         good_login().or(bad_login())
     }
 
-    // /good_login
+    /// /good_login
     pub fn good_login(
     ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
         warp::path!("good_login")
@@ -24,7 +25,7 @@ mod filters {
             .and_then(handlers::handle_good_login)
     }
 
-    // /bad_login
+    /// /bad_login
     pub fn bad_login() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
     {
         warp::path!("bad_login")
@@ -33,33 +34,38 @@ mod filters {
             .and_then(handlers::handle_bad_login)
     }
 
-    fn json_body() -> impl Filter<Extract = (User,), Error = warp::Rejection> + Clone {
+    fn json_body() -> impl Filter<Extract = (LoginDetails,), Error = warp::Rejection> + Clone {
         warp::body::json()
     }
 }
 
+/// Handlers for the external routes
 mod handlers {
-    use super::models::User;
+    use super::models::LoginDetails;
     use std::convert::Infallible;
     use warp::http::StatusCode;
+    use zkp_client::zkp_auth_client;
 
-    pub async fn handle_good_login(user: User) -> Result<impl warp::Reply, Infallible> {
+    pub async fn handle_good_login(user: LoginDetails) -> Result<impl warp::Reply, Infallible> {
         println!("user: {user:?}");
+        zkp_auth_client::authenticate().await;
         Ok(StatusCode::NOT_FOUND)
     }
 
-    pub async fn handle_bad_login(user: User) -> Result<impl warp::Reply, Infallible> {
+    pub async fn handle_bad_login(user: LoginDetails) -> Result<impl warp::Reply, Infallible> {
         println!("user: {user:?}");
         Ok(StatusCode::NOT_FOUND)
     }
 }
 
+/// A simple model for the putative user
 mod models {
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Deserialize, Serialize, Clone)]
-    pub struct User {
+    pub struct LoginDetails {
         name: String,
+        password: i64,
     }
 }
 

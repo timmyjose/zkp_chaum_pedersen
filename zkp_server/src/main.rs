@@ -5,17 +5,17 @@ use zkp_server::{
         auth_server::{Auth, AuthServer},
         RegisterRequest, RegisterResponse,
     },
-    AuthImpl,
+    Verifier,
 };
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let address = "0.0.0.0:9999".parse()?;
 
-    let auth_server = AuthImpl::default();
+    let verifier = Verifier::default();
 
     Server::builder()
-        .add_service(AuthServer::new(auth_server))
+        .add_service(AuthServer::new(verifier))
         .serve(address)
         .await?;
 
