@@ -46,14 +46,15 @@ mod handlers {
     use warp::http::StatusCode;
     use zkp_client::zkp_auth_client;
 
-    pub async fn handle_good_login(user: LoginDetails) -> Result<impl warp::Reply, Infallible> {
-        println!("user: {user:?}");
-        zkp_auth_client::authenticate().await;
+    pub async fn handle_good_login(login: LoginDetails) -> Result<impl warp::Reply, Infallible> {
+        println!("login: {login:?}");
+        zkp_auth_client::authenticate(login.user.clone(), login.password).await;
         Ok(StatusCode::NOT_FOUND)
     }
 
-    pub async fn handle_bad_login(user: LoginDetails) -> Result<impl warp::Reply, Infallible> {
-        println!("user: {user:?}");
+    pub async fn handle_bad_login(login: LoginDetails) -> Result<impl warp::Reply, Infallible> {
+        println!("login: {login:?}");
+        zkp_auth_client::authenticate(login.user.clone(), login.password).await;
         Ok(StatusCode::NOT_FOUND)
     }
 }
@@ -64,8 +65,8 @@ mod models {
 
     #[derive(Debug, Deserialize, Serialize, Clone)]
     pub struct LoginDetails {
-        name: String,
-        password: i64,
+        pub user: String,
+        pub password: i64,
     }
 }
 

@@ -18,9 +18,49 @@ pub mod zkp_auth {
     tonic::include_proto!("zkp_auth");
 }
 
-type AuthId = i64;
+#[tonic::async_trait]
+impl Auth for Verifier {
+    /// Register the user with the ZKP verifier
+    async fn register(
+        &self,
+        request: Request<RegisterRequest>,
+    ) -> Result<Response<RegisterResponse>, Status> {
+        println!("Got a register request: {request:?}");
 
-static mut VERIFIED_USERS: OnceCell<HashMap<String, AuthId>> = OnceCell::new();
+        let reply = zkp_auth::RegisterResponse {};
+
+        Ok(Response::new(reply))
+    }
+
+    /// Create an authentication challenge for the ZKP Prover
+    async fn create_authentication_challenge(
+        &self,
+        request: Request<AuthenticationChallengeRequest>,
+    ) -> Result<Response<AuthenticationChallengeResponse>, Status> {
+        println!("Got an authentication challenge request: {request:?}");
+
+        let reply = zkp_auth::AuthenticationChallengeResponse {
+            auth_id: "fake auth string".into(),
+            c: 12345,
+        };
+
+        Ok(Response::new(reply))
+    }
+
+    /// Verify the authentication challenge received from the ZKP Prover
+    async fn verify_authentication(
+        &self,
+        request: Request<AuthenticationAnswerRequest>,
+    ) -> Result<Response<AuthenticationAnswerResponse>, Status> {
+        println!("Got an authentication answer request: {request:?}");
+
+        let reply = zkp_auth::AuthenticationAnswerResponse {
+            session_id: "fake session id".into(),
+        };
+
+        Ok(Response::new(reply))
+    }
+}
 
 static P: OnceCell<BigInt> = OnceCell::new();
 static G: OnceCell<BigInt> = OnceCell::new();
@@ -78,7 +118,7 @@ pub struct Verifier {
 }
 
 impl Verifier {
-    pub fn init(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn init(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         P.set(BigInt::from(2u32).pow(255) - BigInt::from(19u32))
             .map_err(|_| format!("Could not set prime P"))?;
         println!("P = {}", get_p());
@@ -90,13 +130,13 @@ impl Verifier {
         Ok(())
     }
 
-    pub fn register(&mut self, y1: BigInt, y2: BigInt) {
+    pub async fn register(&mut self, y1: BigInt, y2: BigInt) {
         println!("y1 = {y1:?}, y2 = {y2:?}");
         self.y1 = y1;
         self.y2 = y2;
     }
 
-    pub fn request_challenge(&mut self, r1: BigInt, r2: BigInt) -> BigInt {
+    pub async fn request_challenge(&mut self, r1: BigInt, r2: BigInt) -> BigInt {
         self.r1 = r1;
         self.r2 = r2;
 
@@ -104,7 +144,7 @@ impl Verifier {
         self.c.clone()
     }
 
-    pub fn verify(&mut self, s: BigInt) -> bool {
+    pub async fn verify(&mut self, s: BigInt) -> bool {
         println!("s = {s:?}");
 
         let (val1, val2) = if s < BigInt::zero() {
@@ -141,49 +181,5 @@ impl Verifier {
         println!("r1_prime = {r1_prime:?}, r2_prime = {r2_prime:?}");
 
         self.r1 == r1_prime && self.r2 == r2_prime
-    }
-}
-
-#[tonic::async_trait]
-impl Auth for Verifier {
-    /// Register the user with the ZKP verifier
-    async fn register(
-        &self,
-        request: Request<RegisterRequest>,
-    ) -> Result<Response<RegisterResponse>, Status> {
-        println!("Got a register request: {request:?}");
-
-        let reply = zkp_auth::RegisterResponse {};
-
-        Ok(Response::new(reply))
-    }
-
-    /// Create an authentication challenge for the ZKP Prover
-    async fn create_authentication_challenge(
-        &self,
-        request: Request<AuthenticationChallengeRequest>,
-    ) -> Result<Response<AuthenticationChallengeResponse>, Status> {
-        println!("Got an authentication challenge request: {request:?}");
-
-        let reply = zkp_auth::AuthenticationChallengeResponse {
-            auth_id: "fake auth string".into(),
-            c: 12345,
-        };
-
-        Ok(Response::new(reply))
-    }
-
-    /// Verify the authentication challenge received from the ZKP Prover
-    async fn verify_authentication(
-        &self,
-        request: Request<AuthenticationAnswerRequest>,
-    ) -> Result<Response<AuthenticationAnswerResponse>, Status> {
-        println!("Got an authentication answer request: {request:?}");
-
-        let reply = zkp_auth::AuthenticationAnswerResponse {
-            session_id: "fake session id".into(),
-        };
-
-        Ok(Response::new(reply))
     }
 }

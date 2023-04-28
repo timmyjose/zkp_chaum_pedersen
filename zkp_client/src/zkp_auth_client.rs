@@ -1,5 +1,5 @@
 use num_bigint::BigInt;
-use num_traits::Zero;
+use num_traits::{ToPrimitive, Zero};
 
 use zkp_auth::auth_client::AuthClient;
 use zkp_auth::{RegisterRequest, RegisterResponse};
@@ -53,14 +53,14 @@ mod prover {
             Ok(())
         }
 
-        pub fn gen_public(&mut self) -> (BigInt, BigInt) {
+        pub async fn gen_public(&mut self) -> (BigInt, BigInt) {
             (
                 get_g().modpow(&self.x, get_p()),
                 get_h().modpow(&self.x, get_p()),
             )
         }
 
-        pub fn gen_random(&mut self) -> (BigInt, BigInt) {
+        pub async fn gen_random(&mut self) -> (BigInt, BigInt) {
             self.k = gen_random_with_n_bits::<128>();
             println!("k = {:?}", self.k);
             (
@@ -69,7 +69,7 @@ mod prover {
             )
         }
 
-        pub fn challenge_answer(&mut self, c: BigInt) -> BigInt {
+        pub async fn challenge_answer(&mut self, c: BigInt) -> BigInt {
             println!("c = {c:?}");
             self.k.clone() - c * self.x.clone()
         }
@@ -105,20 +105,32 @@ pub mod zkp_auth {
 /// If (r1, r2) == (r1', r2') then verified else not verified.
 ///
 ///
-pub async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
-    let mut auth_client = AuthClient::connect("http://zkp_server:9999").await?;
+pub async fn authenticate(user: String, password: i64) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Here?");
+    // TODO - figure out a solution that works with both Docker and the cli.
+    //let mut auth_client = AuthClient::connect("http://zkp_server:9999").await?;
+    let mut auth_client = AuthClient::connect("http://0.0.0.0:9999").await?;
 
     let mut prover = prover::Prover::default();
+
     prover.init(BigInt::zero()).await?;
+    let (y1, y2) = prover.gen_public().await;
 
     let request = tonic::Request::new(RegisterRequest {
-        user: "dummy user".into(),
-        y1: 54321,
-        y2: 54321,
+        user: user.into(),
+        y1: y1.to_i64().unwrap(),
+        y2: y2.to_i64().unwrap(),
     });
 
+    // Step 1 - Registration
     let response = auth_client.register(request).await?;
     println!("{response:?}");
+
+    // Step 2 - Commitment
+
+    // Step 3 - Challenge response
+
+    // Step 4 : Successful authentication or failure
 
     Ok(())
 }
