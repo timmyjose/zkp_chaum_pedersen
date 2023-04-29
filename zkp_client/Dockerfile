@@ -1,6 +1,6 @@
 FROM rust:latest
 WORKDIR /zkp_client
-ENV DOCKER_MODE
+ENV DOCKER_MODE=
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive \
     apt-get install --no-install-recommends --assume-yes \
