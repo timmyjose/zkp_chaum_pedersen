@@ -50,15 +50,11 @@ mod zkp_prover {
     }
 
     /// Initialise the ZKP Prover
-    pub fn init() -> Result<(), Box<dyn std::error::Error>> {
+    pub fn init() {
         P.set(BigInt::from(2u32).pow(255) - BigInt::from(19u32))
-            .map_err(|_| format!("Could not set prime P"))?;
-        G.set(BigInt::from(5u32))
-            .map_err(|_| format!("Could not set generator G"))?;
-        H.set(BigInt::from(3u32))
-            .map_err(|_| format!("Could not set generator H"))?;
-
-        Ok(())
+            .unwrap();
+        G.set(BigInt::from(5u32)).unwrap();
+        H.set(BigInt::from(3u32)).unwrap();
     }
 
     pub fn gen_public(x: &BigInt) -> (BigInt, BigInt) {
@@ -105,7 +101,7 @@ pub async fn register(
     let mut auth_client = connect_to_zkp_server().await?;
 
     // Inititialise the ZKP Prover
-    zkp_prover::init().unwrap();
+    zkp_prover::init();
 
     let secret = BigInt::parse_bytes(password.as_bytes(), 10).unwrap();
     let (y1, y2) = zkp_prover::gen_public(&secret.clone());
@@ -138,9 +134,6 @@ pub async fn login(
     }
 
     let mut auth_client = connect_to_zkp_server().await?;
-
-    // inititalise the ZKP Prover
-    zkp_prover::init();
 
     // Commitment
     // todo: unwrap - custom error message (?)

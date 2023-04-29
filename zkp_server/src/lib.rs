@@ -68,16 +68,13 @@ pub mod zkp_verifier {
     }
 
     /// Initialise the ZKP Verifier
-    pub fn init() -> Result<(), Box<dyn std::error::Error>> {
+    pub fn init() {
         P.set(BigInt::from(2u32).pow(255) - BigInt::from(19u32))
-            .map_err(|_| format!("Could not set prime P"))?;
-        G.set(BigInt::from(5u32))
-            .map_err(|_| format!("Could not set generator G"))?;
-        H.set(BigInt::from(3u32))
-            .map_err(|_| format!("Could not set generator H"))?;
-
-        Ok(())
+            .unwrap();
+        G.set(BigInt::from(5u32)).unwrap();
+        H.set(BigInt::from(3u32)).unwrap();
     }
+
     pub fn request_challenge() -> BigInt {
         gen_random_with_n_bits::<128>()
     }
@@ -189,7 +186,7 @@ impl Auth for Verifier {
         );
 
         // initialise the verifier
-        zkp_verifier::init().unwrap();
+        zkp_verifier::init();
 
         Ok(Response::new(zkp_auth::RegisterResponse {}))
     }
