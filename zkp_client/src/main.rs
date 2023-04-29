@@ -84,12 +84,13 @@ mod handlers {
 
 /// A simple model for the putative user
 mod models {
+    use num_bigint::BigInt;
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Deserialize, Serialize, Clone)]
     pub struct LoginDetails {
         pub user: String,
-        pub password: i64,
+        pub password: String,
     }
 }
 

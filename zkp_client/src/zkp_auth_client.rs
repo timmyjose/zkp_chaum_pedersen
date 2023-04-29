@@ -13,7 +13,7 @@ use crate::{ZkpClientAuthenticationStatus, ZkpClientRegistrationStatus};
 
 // Currently registered users based on their name.
 lazy_static! {
-    static ref REGISTERED_USERS: Mutex<HashMap<String, i64>> = {
+    static ref REGISTERED_USERS: Mutex<HashMap<String, BigInt>> = {
         let mut m = Mutex::new(HashMap::new());
         m
     };
@@ -91,7 +91,7 @@ pub async fn connect_to_zkp_server() -> Result<AuthClient<Channel>, Box<dyn std:
 /// Register the user with the gRPC auth server
 pub async fn register(
     user: String,
-    password: i64,
+    password: String,
 ) -> Result<ZkpClientRegistrationStatus, Box<dyn std::error::Error>> {
     println!("{:?}", REGISTERED_USERS.lock().unwrap());
 
@@ -100,19 +100,19 @@ pub async fn register(
     }
 
     let mut auth_client = connect_to_zkp_server().await?;
-
     let mut prover = prover::Prover::default();
     prover.init();
 
-    // todo - fix bigint issues -> use string? bytes? in protobuf
-    let (y1, y2) = prover.gen_public(password.into());
+    // todo - unwrap
+    let password = BigInt::parse_bytes(password.as_bytes(), 10).unwrap();
+    let (y1, y2) = prover.gen_public(password.clone().into());
 
     println!("y1 = {y1:?}");
 
     let request = tonic::Request::new(RegisterRequest {
         user: user.clone(),
-        y1: y1.to_i64().unwrap(),
-        y2: y2.to_i64().unwrap(),
+        y1: y1.to_string(),
+        y2: y2.to_string(),
     });
 
     let response = auth_client.register(request).await?;
@@ -127,7 +127,7 @@ pub async fn register(
 /// Attempt to authenticate the user with the gRPC server
 pub async fn login(
     user: String,
-    password: i64,
+    password: String,
 ) -> Result<ZkpClientAuthenticationStatus, Box<dyn std::error::Error>> {
     if !REGISTERED_USERS.lock().unwrap().contains_key(&user) {
         return Ok(ZkpClientAuthenticationStatus::UnregisteredUser);
@@ -138,16 +138,24 @@ pub async fn login(
     let mut prover = prover::Prover::default();
     prover.init();
 
+    // Commitment
+    // todo: unwrap - custom error message (?)
+    let password = BigInt::parse_bytes(password.as_bytes(), 10).unwrap();
     let (r1, r2) = prover.gen_random(password.into());
 
     let request = tonic::Request::new(AuthenticationChallengeRequest {
         user,
-        r1: r1.to_i64().unwrap(),
-        r2: r2.to_i64().unwrap(),
+        r1: r1.to_string(),
+        r2: r2.to_string(),
     });
 
+    // Challenge request
     let response = auth_client.create_authentication_challenge(request).await?;
     println!("challenge response: {response:?}");
+
+    // Challenge response
+
+    // Authentication status
 
     Ok(ZkpClientAuthenticationStatus::NotAuthenticated)
 }

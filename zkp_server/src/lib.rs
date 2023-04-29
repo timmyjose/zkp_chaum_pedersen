@@ -1,10 +1,11 @@
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use lazy_static::lazy_static;
 use num_bigint::{BigInt, RandomBits};
 use num_integer::Integer;
 use num_traits::{identities::Zero, One, Signed};
-use tonic::{transport::Server, Request, Response, Status};
+use tonic::{transport::Server, Code, Request, Response, Status};
 
 use crate::zkp_auth::{
     auth_server::{Auth, AuthServer},
@@ -24,7 +25,7 @@ pub mod verifier {
 
     impl Verifier {
         pub fn init(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-            P.set(BigInt::from(2u32).pow(255) - BigInt::from(19u32))
+            P.set(BigInt::from(2u32).pow(255) - BigInt::from(19u32)) // 2^255 - 19
                 .map_err(|_| format!("Could not set prime P"))?;
             println!("P = {}", get_p());
             G.set(BigInt::from(5u32))
@@ -130,33 +131,56 @@ pub mod verifier {
         }
     }
 }
+
 // Verifier state
 type UserVerifierState = (BigInt, BigInt);
 
 // REGISTERED USERS
 lazy_static! {
-    static ref REGISTERED_USERS: HashMap<String, UserVerifierState> = {
-        let mut m = HashMap::new();
+    static ref REGISTERED_USERS: Mutex<HashMap<String, UserVerifierState>> = {
+        let mut m = Mutex::new(HashMap::new());
         m
     };
 }
 
+/// The interface module for the Auth protocol buffer definition
 pub mod zkp_auth {
     tonic::include_proto!("zkp_auth");
 }
 
 #[tonic::async_trait]
 impl Auth for verifier::Verifier {
-    /// Register the user with the ZKP verifier
+    /// Register the user
     async fn register(
         &self,
         request: Request<RegisterRequest>,
     ) -> Result<Response<RegisterResponse>, Status> {
         println!("Got a register request: {request:?}");
 
-        let reply = zkp_auth::RegisterResponse {};
+        let request = request.into_inner();
 
-        Ok(Response::new(reply))
+        // if the call came from a different client, such as grocul, for instance
+        if REGISTERED_USERS.lock().unwrap().contains_key(&request.user) {
+            return Ok(Response::new(zkp_auth::RegisterResponse {}));
+        }
+
+        let y1 = BigInt::parse_bytes(request.y1.as_bytes(), 10)
+            .ok_or(Status::new(Code::InvalidArgument, "failed to extract y1"))?;
+
+        let y2 = BigInt::parse_bytes(request.y2.as_bytes(), 10)
+            .ok_or(Status::new(Code::InvalidArgument, "failed to extract y2"))?;
+
+        REGISTERED_USERS
+            .lock()
+            .unwrap()
+            .insert(request.user, (y1, y2));
+
+        println!(
+            "[Server] REGISTERED_USERS = {:?}",
+            REGISTERED_USERS.lock().unwrap()
+        );
+
+        Ok(Response::new(zkp_auth::RegisterResponse {}))
     }
 
     /// Create an authentication challenge for the ZKP Prover
@@ -168,7 +192,7 @@ impl Auth for verifier::Verifier {
 
         let reply = zkp_auth::AuthenticationChallengeResponse {
             auth_id: "fake auth string".into(),
-            c: 12345,
+            c: "12345".to_owned(),
         };
 
         Ok(Response::new(reply))
