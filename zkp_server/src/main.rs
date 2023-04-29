@@ -1,4 +1,6 @@
 use tonic::{transport::Server, Request, Response, Status};
+use tracing::info;
+use tracing_subscriber;
 
 use zkp_server::{
     zkp_auth::{
@@ -10,9 +12,12 @@ use zkp_server::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let address = "0.0.0.0:9999".parse()?;
+    tracing_subscriber::fmt::init();
 
+    let address = "0.0.0.0:9999".parse()?;
     let verifier = Verifier::default();
+
+    info!("Started ZKP Auth Server on port 9999");
 
     Server::builder()
         .add_service(AuthServer::new(verifier))

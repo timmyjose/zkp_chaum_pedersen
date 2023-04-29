@@ -1,3 +1,5 @@
+use tracing::{debug, info};
+
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -28,6 +30,7 @@ mod zkp_prover {
     use num_traits::{identities::Zero, One, Signed};
     use once_cell::sync::OnceCell;
     use rand::Rng;
+    use tracing::debug;
 
     static P: OnceCell<BigInt> = OnceCell::new();
     static G: OnceCell<BigInt> = OnceCell::new();
@@ -54,7 +57,6 @@ mod zkp_prover {
     pub fn init() -> Result<(), Box<dyn std::error::Error>> {
         P.set(BigInt::from(2u32).pow(255) - BigInt::from(19u32))
             .map_err(|_| format!("Could not set prime P"))?;
-        println!("P = {}", get_p());
         G.set(BigInt::from(5u32))
             .map_err(|_| format!("Could not set generator G"))?;
         H.set(BigInt::from(3u32))
@@ -68,12 +70,12 @@ mod zkp_prover {
     }
 
     pub fn gen_random(k: BigInt) -> (BigInt, BigInt) {
-        println!("k = {:?}", k);
+        debug!("k = {:?}", k);
         (get_g().modpow(&k, get_p()), get_h().modpow(&k, get_p()))
     }
 
     pub fn challenge_answer(c: BigInt, k: BigInt, x: BigInt) -> BigInt {
-        println!("c = {c:?}, x = {x:?}");
+        debug!("c = {c:?}, k = {k:?}, x = {x:?}");
         k.clone() - c * x
     }
 }
@@ -85,9 +87,10 @@ pub mod zkp_auth {
 
 /// Connect to the gRPC auth server
 pub async fn connect_to_zkp_server() -> Result<AuthClient<Channel>, Box<dyn std::error::Error>> {
+    info!("Connecting to Auth Server");
+
     let zkp_server_addr = std::env::var("DOCKER_MODE").map_or("0.0.0.0", |_| "zkp_server");
     let mut auth_client = AuthClient::connect(format!("http://{}:9999", zkp_server_addr)).await?;
-    println!("auth_client = {auth_client:?}");
 
     Ok(auth_client)
 }
@@ -97,7 +100,7 @@ pub async fn register(
     user: String,
     password: String,
 ) -> Result<ZkpClientRegistrationStatus, Box<dyn std::error::Error>> {
-    println!("{:?}", REGISTERED_USERS.lock().unwrap());
+    info!("Preparing to register with the Auth Server");
 
     if REGISTERED_USERS.lock().unwrap().contains_key(&user) {
         return Ok(ZkpClientRegistrationStatus::AlreadyRegistered);
@@ -112,7 +115,7 @@ pub async fn register(
     let secret = BigInt::parse_bytes(password.as_bytes(), 10).unwrap();
     let (y1, y2) = zkp_prover::gen_public(secret.clone().into());
 
-    println!("y1 = {y1:?}");
+    debug!("y1 = {y1:?}, y2 = {y2:?}");
 
     let request = tonic::Request::new(RegisterRequest {
         user: user.clone(),
@@ -120,9 +123,7 @@ pub async fn register(
         y2: y2.to_string(),
     });
 
-    // todo - handle tonic Status error codes
-    let response = auth_client.register(request).await?;
-    println!("{response:?}");
+    auth_client.register(request).await?;
 
     // add user to the map of registered users
     REGISTERED_USERS.lock().unwrap().insert(user, secret);
@@ -135,6 +136,8 @@ pub async fn login(
     user: String,
     password: String,
 ) -> Result<ZkpClientAuthenticationStatus, Box<dyn std::error::Error>> {
+    info!("Preparing to log on to the Auth Server");
+
     if !REGISTERED_USERS.lock().unwrap().contains_key(&user) {
         return Ok(ZkpClientAuthenticationStatus::UnregisteredUser);
     }
@@ -160,7 +163,7 @@ pub async fn login(
         }))
         .await?;
 
-    println!("challenge response: {challenge_response:?}");
+    debug!("challenge response: {challenge_response:?}");
 
     let challenge_response = challenge_response.into_inner();
     let (auth_id, c) = (
@@ -181,13 +184,10 @@ pub async fn login(
     {
         Ok(response) => {
             let response = response.into_inner();
-            println!("answer_response = {response:?}");
-            Ok(ZkpClientAuthenticationStatus::Authenticated)
+            Ok(ZkpClientAuthenticationStatus::Authenticated {
+                session_id: response.session_id,
+            })
         }
-        Err(status) => {
-            eprintln!("{status:?}");
-
-            Ok(ZkpClientAuthenticationStatus::NotAuthenticated)
-        }
+        Err(status) => Ok(ZkpClientAuthenticationStatus::NotAuthenticated),
     }
 }

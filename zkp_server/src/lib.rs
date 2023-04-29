@@ -6,6 +6,7 @@ use num_bigint::{BigInt, RandomBits};
 use num_integer::Integer;
 use num_traits::{identities::Zero, One, Signed};
 use tonic::{transport::Server, Code, Request, Response, Status};
+use tracing::{debug, info};
 
 use crate::zkp_auth::{
     auth_server::{Auth, AuthServer},
@@ -19,6 +20,7 @@ pub mod zkp_verifier {
     use num_traits::{identities::Zero, One, Signed};
     use once_cell::sync::OnceCell;
     use rand::Rng;
+    use tracing::debug;
 
     static P: OnceCell<BigInt> = OnceCell::new();
     static G: OnceCell<BigInt> = OnceCell::new();
@@ -67,16 +69,11 @@ pub mod zkp_verifier {
     }
 
     /// Initialise the ZKP Verifier
-    pub fn init() -> Result<(), Box<dyn std::error::Error>> {
-        P.set(BigInt::from(2u32).pow(255) - BigInt::from(19u32)) // 2^255 - 19
-            .map_err(|_| format!("Could not set prime P"))?;
-        println!("P = {}", get_p());
-        G.set(BigInt::from(5u32))
-            .map_err(|_| format!("Could not set generator G"))?;
-        H.set(BigInt::from(3u32))
-            .map_err(|_| format!("Could not set generator H"))?;
-
-        Ok(())
+    pub fn init() {
+        P.set(BigInt::from(2u32).pow(255) - BigInt::from(19u32))
+            .unwrap();
+        G.set(BigInt::from(5u32)).unwrap();
+        H.set(BigInt::from(3u32)).unwrap();
     }
 
     pub fn request_challenge() -> BigInt {
@@ -84,7 +81,7 @@ pub mod zkp_verifier {
     }
 
     pub fn verify(s: BigInt, c: BigInt, y1: BigInt, y2: BigInt, r1: BigInt, r2: BigInt) -> bool {
-        println!("s = {s:?}");
+        debug!("s = {s:?}, c = {c:?}, y1: {y1:?}, y2: {y2:?}, r1 =  {r1:?}, r2: {r2:?}");
 
         let (val1, val2) = if s < BigInt::zero() {
             let v1 = get_g().modpow(&-s.clone(), get_p());
@@ -113,8 +110,8 @@ pub mod zkp_verifier {
         let r1_prime = (val1 * val3).mod_floor(get_p());
         let r2_prime = (val2 * val4).mod_floor(get_p());
 
-        println!("r1 = {:?}, r2 = {:?}", r1, r2);
-        println!("r1_prime = {r1_prime:?}, r2_prime = {r2_prime:?}");
+        debug!("r1 = {:?}, r2 = {:?}", r1, r2);
+        debug!("r1_prime = {r1_prime:?}, r2_prime = {r2_prime:?}");
 
         r1 == r1_prime && r2 == r2_prime
     }
@@ -158,7 +155,7 @@ impl Auth for Verifier {
         &self,
         request: Request<RegisterRequest>,
     ) -> Result<Response<RegisterResponse>, Status> {
-        println!("Got a register request: {request:?}");
+        info!("[Auth Server] Got a register request: {request:?}");
 
         let request = request.into_inner();
 
@@ -182,11 +179,6 @@ impl Auth for Verifier {
             },
         );
 
-        println!(
-            "[Server] REGISTERED_USERS = {:?}",
-            REGISTERED_USERS.lock().unwrap()
-        );
-
         // initialise the verifier
         zkp_verifier::init();
 
@@ -198,7 +190,7 @@ impl Auth for Verifier {
         &self,
         request: Request<AuthenticationChallengeRequest>,
     ) -> Result<Response<AuthenticationChallengeResponse>, Status> {
-        println!("Got an authentication challenge request: {request:?}");
+        info!("[Auth Server] Got an authentication challenge request: {request:?}");
 
         let request = request.into_inner();
         let (user, r1, r2) = (
@@ -219,8 +211,6 @@ impl Auth for Verifier {
             auth_id: auth_id.clone().to_string(),
             c: challenge.clone().to_string(),
         };
-
-        println!("Setting r1 = {r1:?}, r2 = {r2:?}");
 
         // Update user state
         REGISTERED_USERS
@@ -244,7 +234,7 @@ impl Auth for Verifier {
         &self,
         request: Request<AuthenticationAnswerRequest>,
     ) -> Result<Response<AuthenticationAnswerResponse>, Status> {
-        println!("Got an authentication answer request: {request:?}");
+        info!("[Auth Server] Got an authentication answer request: {request:?}");
 
         let request = request.into_inner();
         let (auth_id, s) = (

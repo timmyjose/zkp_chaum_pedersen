@@ -1,7 +1,11 @@
+use tracing::info;
+use tracing::subscriber;
+
 /// External routes
 mod filters {
     use super::handlers;
     use super::models::LoginDetails;
+    use tracing::info;
     use warp::Filter;
 
     pub fn ext_clients(
@@ -35,14 +39,14 @@ mod filters {
 mod handlers {
     use super::models::LoginDetails;
     use std::convert::Infallible;
+    use tracing::debug;
     use warp::{http::StatusCode, reply};
     use zkp_client::{zkp_auth_client, ZkpClientAuthenticationStatus, ZkpClientRegistrationStatus};
 
     /// Register the user with the Auth Server
     pub async fn handle_registration(login: LoginDetails) -> Result<impl warp::Reply, Infallible> {
-        println!("l[Registration] payload: {login:?}");
+        debug!("[Registration] payload: {login:?}");
 
-        // todo - fix unwrap
         Ok(
             match zkp_auth_client::register(login.user.clone(), login.password)
                 .await
@@ -61,7 +65,7 @@ mod handlers {
 
     /// Attempt to log onto the Auth Server
     pub async fn handle_login(login: LoginDetails) -> Result<impl warp::Reply, Infallible> {
-        println!("l[Login] payload: {login:?}");
+        debug!("[Login] payload: {login:?}");
 
         Ok(
             match zkp_auth_client::login(login.user.clone(), login.password)
@@ -71,7 +75,7 @@ mod handlers {
                 ZkpClientAuthenticationStatus::UnregisteredUser => {
                     reply::with_status("user is not registered!", StatusCode::NOT_FOUND)
                 }
-                ZkpClientAuthenticationStatus::Authenticated => {
+                ZkpClientAuthenticationStatus::Authenticated { session_id } => {
                     reply::with_status("login successful", StatusCode::UNAUTHORIZED)
                 }
                 ZkpClientAuthenticationStatus::NotAuthenticated => {
@@ -84,7 +88,6 @@ mod handlers {
 
 /// A simple model for the putative user
 mod models {
-    use num_bigint::BigInt;
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -96,7 +99,11 @@ mod models {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt::init();
+
     let endpoints = filters::ext_clients();
+
+    info!("Started ZKP Client on port 9999");
 
     warp::serve(endpoints).run(([0, 0, 0, 0], 8888)).await;
 
