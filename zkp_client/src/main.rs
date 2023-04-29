@@ -1,11 +1,8 @@
 use tracing::info;
-use tracing::subscriber;
-
 /// External routes
 mod filters {
     use super::handlers;
     use super::models::LoginDetails;
-    use tracing::info;
     use warp::Filter;
 
     pub fn ext_clients(
@@ -39,13 +36,13 @@ mod filters {
 mod handlers {
     use super::models::LoginDetails;
     use std::convert::Infallible;
-    use tracing::debug;
+    use tracing::info;
     use warp::{http::StatusCode, reply};
     use zkp_client::{zkp_auth_client, ZkpClientAuthenticationStatus, ZkpClientRegistrationStatus};
 
     /// Register the user with the Auth Server
     pub async fn handle_registration(login: LoginDetails) -> Result<impl warp::Reply, Infallible> {
-        debug!("[Registration] payload: {login:?}");
+        info!("[Registration] payload: {login:?}");
 
         Ok(
             match zkp_auth_client::register(login.user.clone(), login.password)
@@ -65,21 +62,23 @@ mod handlers {
 
     /// Attempt to log onto the Auth Server
     pub async fn handle_login(login: LoginDetails) -> Result<impl warp::Reply, Infallible> {
-        debug!("[Login] payload: {login:?}");
+        info!("[Login] payload: {login:?}");
 
         Ok(
             match zkp_auth_client::login(login.user.clone(), login.password)
                 .await
                 .unwrap()
             {
-                ZkpClientAuthenticationStatus::UnregisteredUser => {
-                    reply::with_status("user is not registered!", StatusCode::NOT_FOUND)
-                }
-                ZkpClientAuthenticationStatus::Authenticated { session_id } => {
-                    reply::with_status("login successful", StatusCode::UNAUTHORIZED)
-                }
-                ZkpClientAuthenticationStatus::NotAuthenticated => {
-                    reply::with_status("login failed", StatusCode::OK)
+                ZkpClientAuthenticationStatus::UnregisteredUser => reply::with_status(
+                    format!("User {} is not registered!", login.user),
+                    StatusCode::NOT_FOUND,
+                ),
+                ZkpClientAuthenticationStatus::Authenticated { session_id } => reply::with_status(
+                    format!("login successful, session_id = {session_id}"),
+                    StatusCode::UNAUTHORIZED,
+                ),
+                ZkpClientAuthenticationStatus::NotAuthenticated { status } => {
+                    reply::with_status(format!("login failed, reason = {status}"), StatusCode::OK)
                 }
             },
         )

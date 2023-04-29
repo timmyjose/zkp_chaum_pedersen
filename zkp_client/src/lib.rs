@@ -5,7 +5,7 @@ pub enum ZkpClientRegistrationStatus {
 
 pub enum ZkpClientAuthenticationStatus {
     Authenticated { session_id: String },
-    NotAuthenticated,
+    NotAuthenticated { status: String },
     UnregisteredUser,
 }
 

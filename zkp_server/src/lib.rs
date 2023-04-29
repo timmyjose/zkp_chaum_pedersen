@@ -2,16 +2,14 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use lazy_static::lazy_static;
-use num_bigint::{BigInt, RandomBits};
-use num_integer::Integer;
-use num_traits::{identities::Zero, One, Signed};
-use tonic::{transport::Server, Code, Request, Response, Status};
-use tracing::{debug, info};
+use num_bigint::BigInt;
+use tonic::{Code, Request, Response, Status};
+use tracing::info;
 
 use crate::zkp_auth::{
-    auth_server::{Auth, AuthServer},
-    AuthenticationAnswerRequest, AuthenticationAnswerResponse, AuthenticationChallengeRequest,
-    AuthenticationChallengeResponse, RegisterRequest, RegisterResponse,
+    auth_server::Auth, AuthenticationAnswerRequest, AuthenticationAnswerResponse,
+    AuthenticationChallengeRequest, AuthenticationChallengeResponse, RegisterRequest,
+    RegisterResponse,
 };
 
 pub mod zkp_verifier {
@@ -44,64 +42,75 @@ pub mod zkp_verifier {
     }
 
     // source:https://medium.com/asecuritysite-when-bob-met-alice/to-the-builders-of-our-future-meet-the-chaum-pedersen-non-interactive-zero-knowledge-proof-method-9846dee47fbc
-    fn get_extended_euclidean(b: BigInt, phi: BigInt) -> BigInt {
+    fn get_extended_euclidean(b: &BigInt, phi: &BigInt) -> BigInt {
         let mut u = vec![BigInt::one(), BigInt::zero(), phi.clone()];
-        let mut v = vec![BigInt::zero(), BigInt::one(), b];
+        let mut v = vec![BigInt::zero(), BigInt::one(), b.clone()];
 
         while v[2] != BigInt::zero() {
-            let q = u[2].clone() / v[2].clone();
-            let temp1 = u[0].clone() - q.clone() * v[0].clone();
-            let temp2 = u[1].clone() - q.clone() * v[1].clone();
-            let temp3 = u[2].clone() - q.clone() * v[2].clone();
-            u[0] = v[0].clone();
-            u[1] = v[1].clone();
-            u[2] = v[2].clone();
+            let q = &u[2] / &v[2];
+            let temp1 = &u[0] - &q * &v[0];
+            let temp2 = &u[1] - &q * &v[1];
+            let temp3 = &u[2] - &q * &v[2];
+
+            u[0] = std::mem::take(&mut v[0]);
+            u[1] = std::mem::take(&mut v[1]);
+            u[2] = std::mem::take(&mut v[2]);
             v[0] = temp1;
             v[1] = temp2;
             v[2] = temp3;
         }
 
         if u[1] < BigInt::zero() {
-            u[1].clone() + phi
+            &u[1] + phi
         } else {
-            u[1].clone()
+            std::mem::take(&mut u[1])
         }
     }
 
     /// Initialise the ZKP Verifier
-    pub fn init() {
+    pub fn init() -> Result<(), Box<dyn std::error::Error>> {
         P.set(BigInt::from(2u32).pow(255) - BigInt::from(19u32))
-            .unwrap();
-        G.set(BigInt::from(5u32)).unwrap();
-        H.set(BigInt::from(3u32)).unwrap();
-    }
+            .map_err(|_| format!("Could not set prime P"))?;
+        G.set(BigInt::from(5u32))
+            .map_err(|_| format!("Could not set generator G"))?;
+        H.set(BigInt::from(3u32))
+            .map_err(|_| format!("Could not set generator H"))?;
 
+        Ok(())
+    }
     pub fn request_challenge() -> BigInt {
         gen_random_with_n_bits::<128>()
     }
 
-    pub fn verify(s: BigInt, c: BigInt, y1: BigInt, y2: BigInt, r1: BigInt, r2: BigInt) -> bool {
+    pub fn verify(
+        s: &BigInt,
+        c: &BigInt,
+        y1: &BigInt,
+        y2: &BigInt,
+        r1: &BigInt,
+        r2: &BigInt,
+    ) -> bool {
         debug!("s = {s:?}, c = {c:?}, y1: {y1:?}, y2: {y2:?}, r1 =  {r1:?}, r2: {r2:?}");
 
-        let (val1, val2) = if s < BigInt::zero() {
-            let v1 = get_g().modpow(&-s.clone(), get_p());
+        let (val1, val2) = if *s < BigInt::zero() {
+            let v1 = get_g().modpow(&-s, get_p());
             let v2 = get_h().modpow(&-s, get_p());
 
             (
-                get_extended_euclidean(v1, get_p().clone()),
-                get_extended_euclidean(v2, get_p().clone()),
+                get_extended_euclidean(&v1, &get_p()),
+                get_extended_euclidean(&v2, &get_p()),
             )
         } else {
             (get_g().modpow(&s, get_p()), get_h().modpow(&s, get_p()))
         };
 
-        let (val3, val4) = if c < BigInt::zero() {
-            let v1 = y1.modpow(&c, get_p());
-            let v2 = y2.modpow(&c, get_p());
+        let (val3, val4) = if *c < BigInt::zero() {
+            let v1 = y1.modpow(&c, &get_p());
+            let v2 = y2.modpow(&c, &get_p());
 
             (
-                get_extended_euclidean(v1, get_p().clone()),
-                get_extended_euclidean(v2, get_p().clone()),
+                get_extended_euclidean(&v1, &get_p()),
+                get_extended_euclidean(&v2, &get_p()),
             )
         } else {
             (y1.modpow(&c, get_p()), y2.modpow(&c, get_p()))
@@ -113,7 +122,7 @@ pub mod zkp_verifier {
         debug!("r1 = {:?}, r2 = {:?}", r1, r2);
         debug!("r1_prime = {r1_prime:?}, r2_prime = {r2_prime:?}");
 
-        r1 == r1_prime && r2 == r2_prime
+        *r1 == r1_prime && *r2 == r2_prime
     }
 }
 
@@ -131,11 +140,11 @@ struct VerifierUserState {
 // REGISTERED USERS
 lazy_static! {
     static ref REGISTERED_USERS: Mutex<HashMap<String, VerifierUserState>> = {
-        let mut m = Mutex::new(HashMap::new());
+        let m = Mutex::new(HashMap::new());
         m
     };
     static ref AUTH_ID_USER_MAP: Mutex<HashMap<BigInt, String>> = {
-        let mut m = Mutex::new(HashMap::new());
+        let m = Mutex::new(HashMap::new());
         m
     };
 }
@@ -180,7 +189,7 @@ impl Auth for Verifier {
         );
 
         // initialise the verifier
-        zkp_verifier::init();
+        zkp_verifier::init().unwrap();
 
         Ok(Response::new(zkp_auth::RegisterResponse {}))
     }
@@ -268,7 +277,7 @@ impl Auth for Verifier {
             user_state.c.clone().unwrap().clone(),
         );
 
-        if zkp_verifier::verify(s, c, y1, y2, r1, r2) {
+        if zkp_verifier::verify(&s, &c, &y1, &y2, &r1, &r2) {
             Ok(Response::new(zkp_auth::AuthenticationAnswerResponse {
                 session_id: zkp_verifier::gen_random_with_n_bits::<128>().to_string(),
             }))

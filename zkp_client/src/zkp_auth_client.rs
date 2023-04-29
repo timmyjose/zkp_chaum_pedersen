@@ -5,20 +5,17 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use num_bigint::BigInt;
-use num_traits::{ToPrimitive, Zero};
-use tonic::{transport::Channel, Response, Status};
+use tonic::transport::Channel;
 
 use zkp_auth::auth_client::AuthClient;
-use zkp_auth::{
-    AuthenticationAnswerRequest, AuthenticationChallengeRequest, RegisterRequest, RegisterResponse,
-};
+use zkp_auth::{AuthenticationAnswerRequest, AuthenticationChallengeRequest, RegisterRequest};
 
 use crate::{ZkpClientAuthenticationStatus, ZkpClientRegistrationStatus};
 
 // Currently registered users based on their name.
 lazy_static! {
     static ref REGISTERED_USERS: Mutex<HashMap<String, BigInt>> = {
-        let mut m = Mutex::new(HashMap::new());
+        let m = Mutex::new(HashMap::new());
         m
     };
 }
@@ -26,8 +23,7 @@ lazy_static! {
 // The ZKP Chaum-Pedersen prover
 mod zkp_prover {
     use num_bigint::{BigInt, RandomBits};
-    use num_integer::Integer;
-    use num_traits::{identities::Zero, One, Signed};
+    use num_traits::Signed;
     use once_cell::sync::OnceCell;
     use rand::Rng;
     use tracing::debug;
@@ -65,11 +61,11 @@ mod zkp_prover {
         Ok(())
     }
 
-    pub fn gen_public(x: BigInt) -> (BigInt, BigInt) {
+    pub fn gen_public(x: &BigInt) -> (BigInt, BigInt) {
         (get_g().modpow(&x, get_p()), get_h().modpow(&x, get_p()))
     }
 
-    pub fn gen_random(k: BigInt) -> (BigInt, BigInt) {
+    pub fn gen_random(k: &BigInt) -> (BigInt, BigInt) {
         debug!("k = {:?}", k);
         (get_g().modpow(&k, get_p()), get_h().modpow(&k, get_p()))
     }
@@ -90,7 +86,7 @@ pub async fn connect_to_zkp_server() -> Result<AuthClient<Channel>, Box<dyn std:
     info!("Connecting to Auth Server");
 
     let zkp_server_addr = std::env::var("DOCKER_MODE").map_or("0.0.0.0", |_| "zkp_server");
-    let mut auth_client = AuthClient::connect(format!("http://{}:9999", zkp_server_addr)).await?;
+    let auth_client = AuthClient::connect(format!("http://{}:9999", zkp_server_addr)).await?;
 
     Ok(auth_client)
 }
@@ -109,11 +105,10 @@ pub async fn register(
     let mut auth_client = connect_to_zkp_server().await?;
 
     // Inititialise the ZKP Prover
-    zkp_prover::init();
+    zkp_prover::init().unwrap();
 
-    // todo - unwrap
     let secret = BigInt::parse_bytes(password.as_bytes(), 10).unwrap();
-    let (y1, y2) = zkp_prover::gen_public(secret.clone().into());
+    let (y1, y2) = zkp_prover::gen_public(&secret.clone());
 
     debug!("y1 = {y1:?}, y2 = {y2:?}");
 
@@ -144,7 +139,7 @@ pub async fn login(
 
     let mut auth_client = connect_to_zkp_server().await?;
 
-    // inititailse the ZKP Prover
+    // inititalise the ZKP Prover
     zkp_prover::init();
 
     // Commitment
@@ -152,7 +147,7 @@ pub async fn login(
     let password = BigInt::parse_bytes(password.as_bytes(), 10).unwrap();
 
     let k = zkp_prover::gen_random_with_n_bits::<128>();
-    let (r1, r2) = zkp_prover::gen_random(k.clone());
+    let (r1, r2) = zkp_prover::gen_random(&k);
 
     // Challenge request
     let challenge_response = auth_client
@@ -172,8 +167,6 @@ pub async fn login(
     );
 
     // Challenge answer
-    let secret = REGISTERED_USERS.lock().unwrap().get(&user).unwrap().clone();
-
     // Authentication status
     match auth_client
         .verify_authentication(tonic::Request::new(AuthenticationAnswerRequest {
@@ -188,6 +181,8 @@ pub async fn login(
                 session_id: response.session_id,
             })
         }
-        Err(status) => Ok(ZkpClientAuthenticationStatus::NotAuthenticated),
+        Err(status) => Ok(ZkpClientAuthenticationStatus::NotAuthenticated {
+            status: status.to_string(),
+        }),
     }
 }

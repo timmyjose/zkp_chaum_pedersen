@@ -1,14 +1,8 @@
-use tonic::{transport::Server, Request, Response, Status};
+use tonic::transport::Server;
 use tracing::info;
 use tracing_subscriber;
 
-use zkp_server::{
-    zkp_auth::{
-        auth_server::{Auth, AuthServer},
-        RegisterRequest, RegisterResponse,
-    },
-    Verifier,
-};
+use zkp_server::{zkp_auth::auth_server::AuthServer, Verifier};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
