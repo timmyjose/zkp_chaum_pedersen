@@ -1,10 +1,3 @@
-use once_cell::sync::OnceCell;
-use std::collections::HashMap;
-
-type SessionId = String;
-
-static mut LOGGED_IN_USERS: OnceCell<HashMap<String, SessionId>> = OnceCell::new();
-
 /// External routes
 mod filters {
     use super::handlers;
@@ -13,25 +6,24 @@ mod filters {
 
     pub fn ext_clients(
     ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-        good_login().or(bad_login())
+        register().or(login())
     }
 
-    /// /good_login
-    pub fn good_login(
-    ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-        warp::path!("good_login")
-            .and(warp::post())
-            .and(json_body())
-            .and_then(handlers::handle_good_login)
-    }
-
-    /// /bad_login
-    pub fn bad_login() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
+    /// POST /register with expected payload, { user : String, password: i64  }
+    pub fn register() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
     {
-        warp::path!("bad_login")
+        warp::path!("register")
             .and(warp::post())
             .and(json_body())
-            .and_then(handlers::handle_bad_login)
+            .and_then(handlers::handle_registration)
+    }
+
+    /// POST /login with expected payload, { user: String, password: i64 }
+    pub fn login() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+        warp::path!("login")
+            .and(warp::post())
+            .and(json_body())
+            .and_then(handlers::handle_login)
     }
 
     fn json_body() -> impl Filter<Extract = (LoginDetails,), Error = warp::Rejection> + Clone {
@@ -43,19 +35,50 @@ mod filters {
 mod handlers {
     use super::models::LoginDetails;
     use std::convert::Infallible;
-    use warp::http::StatusCode;
-    use zkp_client::zkp_auth_client;
+    use warp::{http::StatusCode, reply};
+    use zkp_client::{zkp_auth_client, ZkpClientAuthenticationStatus, ZkpClientRegistrationStatus};
 
-    pub async fn handle_good_login(login: LoginDetails) -> Result<impl warp::Reply, Infallible> {
-        println!("login: {login:?}");
-        zkp_auth_client::authenticate(login.user.clone(), login.password).await;
-        Ok(StatusCode::NOT_FOUND)
+    /// Register the user with the Auth Server
+    pub async fn handle_registration(login: LoginDetails) -> Result<impl warp::Reply, Infallible> {
+        println!("l[Registration] payload: {login:?}");
+
+        // todo - fix unwrap
+        Ok(
+            match zkp_auth_client::register(login.user.clone(), login.password)
+                .await
+                .unwrap()
+            {
+                ZkpClientRegistrationStatus::Registered => {
+                    reply::with_status("User registered", StatusCode::CREATED)
+                }
+
+                ZkpClientRegistrationStatus::AlreadyRegistered => {
+                    reply::with_status("User already registered", StatusCode::CONFLICT)
+                }
+            },
+        )
     }
 
-    pub async fn handle_bad_login(login: LoginDetails) -> Result<impl warp::Reply, Infallible> {
-        println!("login: {login:?}");
-        zkp_auth_client::authenticate(login.user.clone(), login.password).await;
-        Ok(StatusCode::NOT_FOUND)
+    /// Attempt to log onto the Auth Server
+    pub async fn handle_login(login: LoginDetails) -> Result<impl warp::Reply, Infallible> {
+        println!("l[Login] payload: {login:?}");
+
+        Ok(
+            match zkp_auth_client::login(login.user.clone(), login.password)
+                .await
+                .unwrap()
+            {
+                ZkpClientAuthenticationStatus::UnregisteredUser => {
+                    reply::with_status("user is not registered!", StatusCode::NOT_FOUND)
+                }
+                ZkpClientAuthenticationStatus::Authenticated => {
+                    reply::with_status("login successful", StatusCode::UNAUTHORIZED)
+                }
+                ZkpClientAuthenticationStatus::NotAuthenticated => {
+                    reply::with_status("login failed", StatusCode::OK)
+                }
+            },
+        )
     }
 }
 

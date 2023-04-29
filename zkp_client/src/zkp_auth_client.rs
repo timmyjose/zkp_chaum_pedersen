@@ -1,16 +1,30 @@
+use lazy_static::lazy_static;
+use std::collections::HashMap;
+use std::sync::Mutex;
+
 use num_bigint::BigInt;
 use num_traits::{ToPrimitive, Zero};
+use tonic::transport::Channel;
 
 use zkp_auth::auth_client::AuthClient;
-use zkp_auth::{RegisterRequest, RegisterResponse};
+use zkp_auth::{AuthenticationChallengeRequest, RegisterRequest, RegisterResponse};
 
-/// The ZKP Chaum-Pedersen prover
+use crate::{ZkpClientAuthenticationStatus, ZkpClientRegistrationStatus};
+
+// Currently registered users based on their name.
+lazy_static! {
+    static ref REGISTERED_USERS: Mutex<HashMap<String, i64>> = {
+        let mut m = Mutex::new(HashMap::new());
+        m
+    };
+}
+
+// The ZKP Chaum-Pedersen prover
 mod prover {
     use num_bigint::{BigInt, RandomBits};
     use num_integer::Integer;
     use num_traits::{identities::Zero, One, Signed};
     use once_cell::sync::OnceCell;
-    use rand::Rng;
 
     static P: OnceCell<BigInt> = OnceCell::new();
     static G: OnceCell<BigInt> = OnceCell::new();
@@ -28,19 +42,11 @@ mod prover {
         H.get().unwrap()
     }
 
-    fn gen_random_with_n_bits<const N: u64>() -> BigInt {
-        let mut rng = rand::thread_rng();
-        rng.sample::<BigInt, _>(RandomBits::new(N)).abs()
-    }
-
     #[derive(Default)]
-    pub(crate) struct Prover {
-        x: BigInt,
-        k: BigInt,
-    }
+    pub(crate) struct Prover;
 
     impl Prover {
-        pub async fn init(&mut self, x: BigInt) -> Result<(), Box<dyn std::error::Error>> {
+        pub fn init(&mut self) -> Result<(), Box<dyn std::error::Error>> {
             P.set(BigInt::from(2u32).pow(255) - BigInt::from(19u32))
                 .map_err(|_| format!("Could not set prime P"))?;
             println!("P = {}", get_p());
@@ -48,89 +54,100 @@ mod prover {
                 .map_err(|_| format!("Could not set generator G"))?;
             H.set(BigInt::from(3u32))
                 .map_err(|_| format!("Could not set generator H"))?;
-            self.x = x;
 
             Ok(())
         }
 
-        pub async fn gen_public(&mut self) -> (BigInt, BigInt) {
-            (
-                get_g().modpow(&self.x, get_p()),
-                get_h().modpow(&self.x, get_p()),
-            )
+        pub fn gen_public(&mut self, x: BigInt) -> (BigInt, BigInt) {
+            (get_g().modpow(&x, get_p()), get_h().modpow(&x, get_p()))
         }
 
-        pub async fn gen_random(&mut self) -> (BigInt, BigInt) {
-            self.k = gen_random_with_n_bits::<128>();
-            println!("k = {:?}", self.k);
-            (
-                get_g().modpow(&self.k, get_p()),
-                get_h().modpow(&self.k, get_p()),
-            )
+        pub fn gen_random(&mut self, k: BigInt) -> (BigInt, BigInt) {
+            println!("k = {:?}", k);
+            (get_g().modpow(&k, get_p()), get_h().modpow(&k, get_p()))
         }
 
-        pub async fn challenge_answer(&mut self, c: BigInt) -> BigInt {
-            println!("c = {c:?}");
-            self.k.clone() - c * self.x.clone()
+        pub fn challenge_answer(&mut self, c: BigInt, k: BigInt, x: BigInt) -> BigInt {
+            println!("c = {c:?}, x = {x:?}");
+            k.clone() - c * x
         }
     }
 }
 
+/// The interface module for the Auth protocol buffer definition
 pub mod zkp_auth {
     tonic::include_proto!("zkp_auth");
 }
 
-/// The ZKP Chaum-Pedersen client protocol
-///
-/// Chaum Perdersen Proof Protocol algorithm:
-///
-/// Select p = 2^255 - 19 (Curve25519, 128 bits)
-///
-/// Select generators g = 5, h = 3.
-///
-/// Prover generates (y1, y2) = (g ^ x mod p, h ^ x mod p), where 'x' is the secret value.
-///
-/// Public knowledge - (y1, y2, p) shared between prover and verifier.
-///
-/// Prover generates a random value k (in the range [0, p - 1]).
-///
-/// Prover sends (r1, r2) = (g ^ k mod p, h ^ k mod p) to the Verifier.
-///
-/// Verifier notes these values and generates a random value k (in the range [0, p - 1]).
-/// Sends this to the Prover.
-///
-/// Prover then sends across value s = (k - c * x) mod p. Sends this to the Verifier.
-///
-/// Verifier computers (r1', r2') = ((g ^ s . y1 ^ c) mod p, (h ^ s . y2 ^ c) mod p).
-/// If (r1, r2) == (r1', r2') then verified else not verified.
-///
-///
-pub async fn authenticate(user: String, password: i64) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Here?");
-    // TODO - figure out a solution that works with both Docker and the cli.
-    //let mut auth_client = AuthClient::connect("http://zkp_server:9999").await?;
-    let mut auth_client = AuthClient::connect("http://0.0.0.0:9999").await?;
+/// Connect to the gRPC auth server
+pub async fn connect_to_zkp_server() -> Result<AuthClient<Channel>, Box<dyn std::error::Error>> {
+    let zkp_server_addr = std::env::var("DOCKER_MODE").map_or("0.0.0.0", |_| "zkp_server");
+    let mut auth_client = AuthClient::connect(format!("http://{}:9999", zkp_server_addr)).await?;
+    println!("auth_client = {auth_client:?}");
+
+    Ok(auth_client)
+}
+
+/// Register the user with the gRPC auth server
+pub async fn register(
+    user: String,
+    password: i64,
+) -> Result<ZkpClientRegistrationStatus, Box<dyn std::error::Error>> {
+    println!("{:?}", REGISTERED_USERS.lock().unwrap());
+
+    if REGISTERED_USERS.lock().unwrap().contains_key(&user) {
+        return Ok(ZkpClientRegistrationStatus::AlreadyRegistered);
+    }
+
+    let mut auth_client = connect_to_zkp_server().await?;
 
     let mut prover = prover::Prover::default();
+    prover.init();
 
-    prover.init(BigInt::zero()).await?;
-    let (y1, y2) = prover.gen_public().await;
+    // todo - fix bigint issues -> use string? bytes? in protobuf
+    let (y1, y2) = prover.gen_public(password.into());
+
+    println!("y1 = {y1:?}");
 
     let request = tonic::Request::new(RegisterRequest {
-        user: user.into(),
+        user: user.clone(),
         y1: y1.to_i64().unwrap(),
         y2: y2.to_i64().unwrap(),
     });
 
-    // Step 1 - Registration
     let response = auth_client.register(request).await?;
     println!("{response:?}");
 
-    // Step 2 - Commitment
+    // add user to the map of registered users
+    REGISTERED_USERS.lock().unwrap().insert(user, password);
 
-    // Step 3 - Challenge response
+    Ok(ZkpClientRegistrationStatus::Registered)
+}
 
-    // Step 4 : Successful authentication or failure
+/// Attempt to authenticate the user with the gRPC server
+pub async fn login(
+    user: String,
+    password: i64,
+) -> Result<ZkpClientAuthenticationStatus, Box<dyn std::error::Error>> {
+    if !REGISTERED_USERS.lock().unwrap().contains_key(&user) {
+        return Ok(ZkpClientAuthenticationStatus::UnregisteredUser);
+    }
 
-    Ok(())
+    let mut auth_client = connect_to_zkp_server().await?;
+
+    let mut prover = prover::Prover::default();
+    prover.init();
+
+    let (r1, r2) = prover.gen_random(password.into());
+
+    let request = tonic::Request::new(AuthenticationChallengeRequest {
+        user,
+        r1: r1.to_i64().unwrap(),
+        r2: r2.to_i64().unwrap(),
+    });
+
+    let response = auth_client.create_authentication_challenge(request).await?;
+    println!("challenge response: {response:?}");
+
+    Ok(ZkpClientAuthenticationStatus::NotAuthenticated)
 }

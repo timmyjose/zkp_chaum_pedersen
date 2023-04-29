@@ -1525,6 +1525,7 @@ checksum = "1a515f5799fe4961cb532f983ce2b23082366b898e52ffbce459c86f67c8378a"
 name = "zkp_client"
 version = "0.1.0"
 dependencies = [
+ "lazy_static",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -1543,6 +1544,7 @@ dependencies = [
 name = "zkp_server"
 version = "0.1.0"
 dependencies = [
+ "lazy_static",
  "num-bigint",
  "num-integer",
  "num-traits",
