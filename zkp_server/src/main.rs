@@ -1,11 +1,11 @@
 use tonic::{transport::Server, Request, Response, Status};
 
 use zkp_server::{
-    verifier::Verifier,
     zkp_auth::{
         auth_server::{Auth, AuthServer},
         RegisterRequest, RegisterResponse,
     },
+    Verifier,
 };
 
 #[tokio::main]

@@ -13,77 +13,12 @@ use crate::zkp_auth::{
     AuthenticationChallengeResponse, RegisterRequest, RegisterResponse,
 };
 
-pub mod verifier {
+pub mod zkp_verifier {
     use num_bigint::{BigInt, RandomBits};
     use num_integer::Integer;
     use num_traits::{identities::Zero, One, Signed};
     use once_cell::sync::OnceCell;
     use rand::Rng;
-
-    #[derive(Default)]
-    pub struct Verifier;
-
-    impl Verifier {
-        pub fn init(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-            P.set(BigInt::from(2u32).pow(255) - BigInt::from(19u32)) // 2^255 - 19
-                .map_err(|_| format!("Could not set prime P"))?;
-            println!("P = {}", get_p());
-            G.set(BigInt::from(5u32))
-                .map_err(|_| format!("Could not set generator G"))?;
-            H.set(BigInt::from(3u32))
-                .map_err(|_| format!("Could not set generator H"))?;
-
-            Ok(())
-        }
-
-        pub fn request_challenge(&mut self, r1: BigInt, r2: BigInt) -> BigInt {
-            gen_random_with_n_bits::<64>() // TODO - change this to 128 (or more)
-        }
-
-        pub fn verify(
-            &mut self,
-            s: BigInt,
-            c: BigInt,
-            y1: BigInt,
-            y2: BigInt,
-            r1: BigInt,
-            r2: BigInt,
-        ) -> bool {
-            println!("s = {s:?}");
-
-            let (val1, val2) = if s < BigInt::zero() {
-                let v1 = get_g().modpow(&-s.clone(), get_p());
-                let v2 = get_h().modpow(&-s, get_p());
-
-                (
-                    get_extended_euclidean(v1, get_p().clone()),
-                    get_extended_euclidean(v2, get_p().clone()),
-                )
-            } else {
-                (get_g().modpow(&s, get_p()), get_h().modpow(&s, get_p()))
-            };
-
-            let (val3, val4) = if c < BigInt::zero() {
-                let v1 = y1.modpow(&c, get_p());
-                let v2 = y2.modpow(&c, get_p());
-
-                (
-                    get_extended_euclidean(v1, get_p().clone()),
-                    get_extended_euclidean(v2, get_p().clone()),
-                )
-            } else {
-                (y1.modpow(&c, get_p()), y2.modpow(&c, get_p()))
-            };
-
-            let r1_prime = (val1 * val3).mod_floor(get_p());
-            let r2_prime = (val2 * val4).mod_floor(get_p());
-
-            println!("r1 = {:?}, r2 = {:?}", r1, r2);
-            println!("r1_prime = {r1_prime:?}, r2_prime = {r2_prime:?}");
-
-            r1 == r1_prime && r2 == r2_prime
-        }
-    }
 
     static P: OnceCell<BigInt> = OnceCell::new();
     static G: OnceCell<BigInt> = OnceCell::new();
@@ -101,7 +36,7 @@ pub mod verifier {
         H.get().unwrap()
     }
 
-    fn gen_random_with_n_bits<const N: u64>() -> BigInt {
+    pub fn gen_random_with_n_bits<const N: u64>() -> BigInt {
         let mut rng = rand::thread_rng();
         rng.sample::<BigInt, _>(RandomBits::new(N)).abs()
     }
@@ -130,14 +65,79 @@ pub mod verifier {
             u[1].clone()
         }
     }
+
+    /// Initialise the ZKP Verifier
+    pub fn init() -> Result<(), Box<dyn std::error::Error>> {
+        P.set(BigInt::from(2u32).pow(255) - BigInt::from(19u32)) // 2^255 - 19
+            .map_err(|_| format!("Could not set prime P"))?;
+        println!("P = {}", get_p());
+        G.set(BigInt::from(5u32))
+            .map_err(|_| format!("Could not set generator G"))?;
+        H.set(BigInt::from(3u32))
+            .map_err(|_| format!("Could not set generator H"))?;
+
+        Ok(())
+    }
+
+    pub fn request_challenge() -> BigInt {
+        gen_random_with_n_bits::<128>()
+    }
+
+    pub fn verify(s: BigInt, c: BigInt, y1: BigInt, y2: BigInt, r1: BigInt, r2: BigInt) -> bool {
+        println!("s = {s:?}");
+
+        let (val1, val2) = if s < BigInt::zero() {
+            let v1 = get_g().modpow(&-s.clone(), get_p());
+            let v2 = get_h().modpow(&-s, get_p());
+
+            (
+                get_extended_euclidean(v1, get_p().clone()),
+                get_extended_euclidean(v2, get_p().clone()),
+            )
+        } else {
+            (get_g().modpow(&s, get_p()), get_h().modpow(&s, get_p()))
+        };
+
+        let (val3, val4) = if c < BigInt::zero() {
+            let v1 = y1.modpow(&c, get_p());
+            let v2 = y2.modpow(&c, get_p());
+
+            (
+                get_extended_euclidean(v1, get_p().clone()),
+                get_extended_euclidean(v2, get_p().clone()),
+            )
+        } else {
+            (y1.modpow(&c, get_p()), y2.modpow(&c, get_p()))
+        };
+
+        let r1_prime = (val1 * val3).mod_floor(get_p());
+        let r2_prime = (val2 * val4).mod_floor(get_p());
+
+        println!("r1 = {:?}, r2 = {:?}", r1, r2);
+        println!("r1_prime = {r1_prime:?}, r2_prime = {r2_prime:?}");
+
+        r1 == r1_prime && r2 == r2_prime
+    }
 }
 
 // Verifier state
-type UserVerifierState = (BigInt, BigInt);
+
+#[derive(Debug, Default, Clone)]
+struct VerifierUserState {
+    y1: BigInt,
+    y2: BigInt,
+    r1: Option<BigInt>,
+    r2: Option<BigInt>,
+    c: Option<BigInt>,
+}
 
 // REGISTERED USERS
 lazy_static! {
-    static ref REGISTERED_USERS: Mutex<HashMap<String, UserVerifierState>> = {
+    static ref REGISTERED_USERS: Mutex<HashMap<String, VerifierUserState>> = {
+        let mut m = Mutex::new(HashMap::new());
+        m
+    };
+    static ref AUTH_ID_USER_MAP: Mutex<HashMap<BigInt, String>> = {
         let mut m = Mutex::new(HashMap::new());
         m
     };
@@ -148,8 +148,11 @@ pub mod zkp_auth {
     tonic::include_proto!("zkp_auth");
 }
 
+#[derive(Debug, Default)]
+pub struct Verifier {}
+
 #[tonic::async_trait]
-impl Auth for verifier::Verifier {
+impl Auth for Verifier {
     /// Register the user
     async fn register(
         &self,
@@ -170,15 +173,22 @@ impl Auth for verifier::Verifier {
         let y2 = BigInt::parse_bytes(request.y2.as_bytes(), 10)
             .ok_or(Status::new(Code::InvalidArgument, "failed to extract y2"))?;
 
-        REGISTERED_USERS
-            .lock()
-            .unwrap()
-            .insert(request.user, (y1, y2));
+        REGISTERED_USERS.lock().unwrap().insert(
+            request.user,
+            VerifierUserState {
+                y1,
+                y2,
+                ..VerifierUserState::default()
+            },
+        );
 
         println!(
             "[Server] REGISTERED_USERS = {:?}",
             REGISTERED_USERS.lock().unwrap()
         );
+
+        // initialise the verifier
+        zkp_verifier::init();
 
         Ok(Response::new(zkp_auth::RegisterResponse {}))
     }
@@ -190,10 +200,41 @@ impl Auth for verifier::Verifier {
     ) -> Result<Response<AuthenticationChallengeResponse>, Status> {
         println!("Got an authentication challenge request: {request:?}");
 
+        let request = request.into_inner();
+        let (user, r1, r2) = (
+            request.user,
+            BigInt::parse_bytes(request.r1.as_bytes(), 10).unwrap(),
+            BigInt::parse_bytes(request.r2.as_bytes(), 10).unwrap(),
+        );
+
+        // ensure that the user has been registered
+        if !REGISTERED_USERS.lock().unwrap().contains_key(&user) {
+            return Err(Status::new(Code::NotFound, "user is not registered"));
+        }
+
+        let auth_id = zkp_verifier::gen_random_with_n_bits::<128>();
+        let challenge = zkp_verifier::request_challenge();
+
         let reply = zkp_auth::AuthenticationChallengeResponse {
-            auth_id: "fake auth string".into(),
-            c: "12345".to_owned(),
+            auth_id: auth_id.clone().to_string(),
+            c: challenge.clone().to_string(),
         };
+
+        println!("Setting r1 = {r1:?}, r2 = {r2:?}");
+
+        // Update user state
+        REGISTERED_USERS
+            .lock()
+            .unwrap()
+            .entry(user.clone())
+            .and_modify(|state| {
+                state.c = Some(challenge);
+                state.r1 = Some(r1);
+                state.r2 = Some(r2)
+            });
+
+        // map the auth_id to the user - override to always have the latest mapping
+        AUTH_ID_USER_MAP.lock().unwrap().insert(auth_id, user);
 
         Ok(Response::new(reply))
     }
@@ -205,10 +246,47 @@ impl Auth for verifier::Verifier {
     ) -> Result<Response<AuthenticationAnswerResponse>, Status> {
         println!("Got an authentication answer request: {request:?}");
 
-        let reply = zkp_auth::AuthenticationAnswerResponse {
-            session_id: "fake session id".into(),
-        };
+        let request = request.into_inner();
+        let (auth_id, s) = (
+            BigInt::parse_bytes(request.auth_id.as_bytes(), 10).unwrap(),
+            BigInt::parse_bytes(request.s.as_bytes(), 10).unwrap(),
+        );
 
-        Ok(Response::new(reply))
+        // verifys: BigInt, c: BigInt, y1: BigInt, y2: BigInt, r1: BigInt, r2: BigInt
+        // todo : error-handling
+        let user_for_auth_id = AUTH_ID_USER_MAP
+            .lock()
+            .unwrap()
+            .get(&auth_id)
+            .clone()
+            .unwrap()
+            .clone();
+
+        let user_state = REGISTERED_USERS
+            .lock()
+            .unwrap()
+            .get(&user_for_auth_id)
+            .clone()
+            .unwrap()
+            .clone();
+
+        let (y1, y2, r1, r2, c) = (
+            user_state.y1.clone(),
+            user_state.y2.clone(),
+            user_state.r1.clone().unwrap().clone(),
+            user_state.r2.clone().unwrap().clone(),
+            user_state.c.clone().unwrap().clone(),
+        );
+
+        if zkp_verifier::verify(s, c, y1, y2, r1, r2) {
+            Ok(Response::new(zkp_auth::AuthenticationAnswerResponse {
+                session_id: zkp_verifier::gen_random_with_n_bits::<128>().to_string(),
+            }))
+        } else {
+            Err(Status::new(
+                Code::Unauthenticated,
+                "user authentication failed",
+            ))
+        }
     }
 }
