@@ -1,5 +1,6 @@
 use tracing::info;
-/// External routes
+
+/// External REST endpoints for the ZKP Client
 mod filters {
     use super::handlers;
     use super::models::LoginDetails;
@@ -10,7 +11,7 @@ mod filters {
         register().or(login())
     }
 
-    /// POST /register with expected payload, { user : String, password: i64  }
+    /// POST /register with expected payload, { user : String, password: String  }
     pub fn register() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
     {
         warp::path!("register")
@@ -19,7 +20,7 @@ mod filters {
             .and_then(handlers::handle_registration)
     }
 
-    /// POST /login with expected payload, { user: String, password: i64 }
+    /// POST /login with expected payload, { user: String, password: String }
     pub fn login() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
         warp::path!("login")
             .and(warp::post())
@@ -32,17 +33,18 @@ mod filters {
     }
 }
 
-/// Handlers for the external routes
+/// Handlers for the external REST endpoints
 mod handlers {
     use super::models::LoginDetails;
     use std::convert::Infallible;
-    use tracing::info;
+    use tracing::{debug, info};
     use warp::{http::StatusCode, reply};
     use zkp_client::{zkp_auth_client, ZkpClientAuthenticationStatus, ZkpClientRegistrationStatus};
 
-    /// Register the user with the Auth Server
+    /// Register the user with the Auth Server via the ZKP Auth client
     pub async fn handle_registration(login: LoginDetails) -> Result<impl warp::Reply, Infallible> {
-        info!("[Registration] payload: {login:?}");
+        info!("Registering user {:?} with the server", login.user);
+        debug!("Registration payload: {login:?}");
 
         Ok(
             match zkp_auth_client::register(login.user.clone(), login.password)
@@ -60,9 +62,10 @@ mod handlers {
         )
     }
 
-    /// Attempt to log onto the Auth Server
+    /// Attempt to log onto the Auth Server via the ZKP Auth Client
     pub async fn handle_login(login: LoginDetails) -> Result<impl warp::Reply, Infallible> {
-        info!("[Login] payload: {login:?}");
+        info!("Attempting to log user {:?} in", login.user);
+        debug!("Login payload: {login:?}");
 
         Ok(
             match zkp_auth_client::login(login.user.clone(), login.password)
@@ -92,19 +95,26 @@ mod models {
     #[derive(Debug, Deserialize, Serialize, Clone)]
     pub struct LoginDetails {
         pub user: String,
+        // so that we can read in a BigInt. `serde` and `num_bigint` do support native big integers
+        // but the JSON format does not, unfortunately.
         pub password: String,
     }
 }
 
+/// The REST interface for the ZKP Auth client
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // In a real project, this would be read off of a configuration file
+    const CLIENT_ADDR: [u8; 4] = [0u8, 0u8, 0u8, 0u8];
+    const CLIENT_PORT: u16 = 8888u16;
+
     tracing_subscriber::fmt::init();
 
     let endpoints = filters::ext_clients();
 
-    info!("Started ZKP Client on port 9999");
+    info!("Started ZKP Client on port {CLIENT_PORT:?}");
 
-    warp::serve(endpoints).run(([0, 0, 0, 0], 8888)).await;
+    warp::serve(endpoints).run((CLIENT_ADDR, CLIENT_PORT)).await;
 
     Ok(())
 }
