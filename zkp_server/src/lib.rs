@@ -125,6 +125,20 @@ pub mod zkp_verifier {
 
         *r1 == r1_prime && *r2 == r2_prime
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_init() {
+            init();
+
+            assert_eq!(*get_p(), BigInt::from(2u32).pow(255) - BigInt::from(19u32));
+            assert_eq!(*get_g(), BigInt::from(5u32));
+            assert_eq!(*get_h(), BigInt::from(3u32));
+        }
+    }
 }
 
 /// Verifier state
