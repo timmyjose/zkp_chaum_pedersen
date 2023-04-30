@@ -55,10 +55,9 @@ mod zkp_prover {
 
     /// Initialise the ZKP Prover
     pub fn init() {
-        P.set(BigInt::from(2u32).pow(255) - BigInt::from(19u32))
-            .unwrap(); // 2^255 - 19
-        G.set(BigInt::from(5u32)).unwrap();
-        H.set(BigInt::from(3u32)).unwrap();
+        let _ = P.set(BigInt::from(2u32).pow(255) - BigInt::from(19u32));
+        let _ = G.set(BigInt::from(5u32));
+        let _ = H.set(BigInt::from(3u32));
     }
 
     /// Generate the public data for the Chaum-Pedersen protocol - (y1, y2)
