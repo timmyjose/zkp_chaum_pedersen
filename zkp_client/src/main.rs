@@ -35,7 +35,7 @@ mod filters {
 
 /// Handlers for the external REST endpoints
 mod handlers {
-    use super::models::LoginDetails;
+    use super::models::{AuthenticationResponse, LoginDetails, RegistrationResponse};
     use std::convert::Infallible;
     use tracing::{debug, info};
     use warp::{http::StatusCode, reply};
@@ -51,13 +51,21 @@ mod handlers {
                 .await
                 .unwrap()
             {
-                ZkpClientRegistrationStatus::Registered => {
-                    reply::with_status("User registered", StatusCode::CREATED)
-                }
+                ZkpClientRegistrationStatus::Registered => reply::with_status(
+                    reply::json(&RegistrationResponse {
+                        user: login.user,
+                        status: "registered",
+                    }),
+                    StatusCode::CREATED,
+                ),
 
-                ZkpClientRegistrationStatus::AlreadyRegistered => {
-                    reply::with_status("User already registered", StatusCode::CONFLICT)
-                }
+                ZkpClientRegistrationStatus::AlreadyRegistered => reply::with_status(
+                    reply::json(&RegistrationResponse {
+                        user: login.user,
+                        status: "already registered",
+                    }),
+                    StatusCode::CONFLICT,
+                ),
             },
         )
     }
@@ -73,16 +81,29 @@ mod handlers {
                 .unwrap()
             {
                 ZkpClientAuthenticationStatus::UnregisteredUser => reply::with_status(
-                    format!("User {} is not registered!", login.user),
+                    reply::json(&AuthenticationResponse {
+                        user: login.user,
+                        status: "unregistered user".into(),
+                        session_id: None,
+                    }),
                     StatusCode::NOT_FOUND,
                 ),
                 ZkpClientAuthenticationStatus::Authenticated { session_id } => reply::with_status(
-                    format!("login successful, session_id = {session_id}"),
+                    reply::json(&AuthenticationResponse {
+                        user: login.user,
+                        status: "authenticated".into(),
+                        session_id: Some(session_id),
+                    }),
                     StatusCode::UNAUTHORIZED,
                 ),
-                ZkpClientAuthenticationStatus::NotAuthenticated { status } => {
-                    reply::with_status(format!("login failed, reason = {status}"), StatusCode::OK)
-                }
+                ZkpClientAuthenticationStatus::NotAuthenticated { status } => reply::with_status(
+                    reply::json(&AuthenticationResponse {
+                        user: login.user,
+                        status: format!("not authenticated - {status}"),
+                        session_id: None,
+                    }),
+                    StatusCode::OK,
+                ),
             },
         )
     }
@@ -98,6 +119,19 @@ mod models {
         // so that we can read in a BigInt. `serde` and `num_bigint` do support native big integers
         // but the JSON format does not, unfortunately.
         pub password: String,
+    }
+
+    #[derive(Debug, Deserialize, Serialize)]
+    pub struct RegistrationResponse {
+        pub user: String,
+        pub status: &'static str,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct AuthenticationResponse {
+        pub user: String,
+        pub status: String,
+        pub session_id: Option<String>,
     }
 }
 
